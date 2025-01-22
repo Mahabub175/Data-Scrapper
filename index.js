@@ -1,7 +1,12 @@
 const express = require("express");
 const axios = require("axios");
+const cors = require("cors");
+const puppeteer = require("puppeteer");
 
 const app = express();
+
+app.use(cors());
+app.use(express.json());
 
 app.get("/:category?", async (req, res) => {
   let category = req.params.category;
@@ -9,7 +14,7 @@ app.get("/:category?", async (req, res) => {
   if (category) {
     category = category.toLowerCase().replace(/[\s-]+/g, "_");
   }
-  const baseUrl = `https://api.arogga.com/general/v3/search/?_perPage=16&_is_base=1&_haveImage=1&_product_type=${category}&_order=pv_allow_sales%3Adesc%2CproductCountOrdered%3Adesc&_get_filters=true&f=web&b=Chrome&v=131.0.0.0&os=Windows&osv=10`;
+  const baseUrl = `https://api.arogga.com/general/v3/search/?_perPage=1000&_is_base=1&_haveImage=1&_product_type=${category}&_order=pv_allow_sales%3Adesc%2CproductCountOrdered%3Adesc&_get_filters=true&f=web&b=Chrome&v=131.0.0.0&os=Windows&osv=10`;
 
   try {
     let allProducts = [];
@@ -31,16 +36,24 @@ app.get("/:category?", async (req, res) => {
         return {
           name: product.p_name || "",
           category: product.p_type || "",
-          description: product.p_description || "",
-          brand: product.p_brand || "",
-          sellingPrice: mrp,
-          b2cPrice: pvData.pv_b2c_discounted_price || 0,
-          b2bPrice: pvData.pv_b2b_discounted_price || 0,
-          discountPercent: discountPercent,
-          stockStatus:
-            pvData.pv_stock_status === 1 ? "In Stock" : "Out of Stock",
-          mainImage: image,
+          ...(product?.p_brand && { brand: product.p_brand }),
+          ...(product?.p_generic_name && { generic: product.p_generic_name }),
+          ...(product?.p_strength &&
+            (() => {
+              const [firstPart] = product.p_strength.split("+");
+              return {
+                weight: Number(firstPart.replace(/[^\d.]/g, "")),
+                unit: firstPart.replace(/[\d.\s]/g, "").trim(),
+              };
+            })()),
+          sellingPrice: Number(mrp),
+          discountPercent: Number(discountPercent),
+          stockStatus: Number(5),
           offerPrice: Number(offerPrice.toFixed(2)),
+          image:
+            image ||
+            "https://thumbs.dreamstime.com/b/demo-demo-icon-139882881.jpg",
+          description: product.p_description || "",
         };
       });
 
@@ -63,7 +76,67 @@ app.get("/:category?", async (req, res) => {
   }
 });
 
-const PORT = 3000;
+app.get("/scrape/:category", async (req, res) => {
+  let category = req.params.category;
+
+  if (category) {
+    category = category.toLowerCase().replace(/[\s&]+/g, "-");
+  }
+  const url = `https://chaldal.com/${category}`;
+
+  try {
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+
+    await page.goto(url, { waitUntil: "load", timeout: 0 });
+
+    const products = await page.evaluate(() => {
+      const productElements = document.querySelectorAll(".product");
+      return Array.from(productElements).map((product) => {
+        const name = product.querySelector(".name")?.textContent.trim() || null;
+        const subText =
+          product.querySelector(".subText")?.textContent.trim() || null;
+        const price =
+          product
+            .querySelector(".price span:nth-child(2)")
+            ?.textContent.trim()
+            .replace(/,/g, "") || null;
+        const discountedPrice =
+          product
+            .querySelector(".discountedPrice span:nth-child(2)")
+            ?.textContent.trim()
+            .replace(/,/g, "") || null;
+        const image = product
+          .querySelector(".imageWrapper img")
+          ?.getAttribute("src");
+
+        return {
+          name,
+          subText,
+          price: price ? parseFloat(price) : null,
+          ...(discountedPrice && {
+            discountedPrice: parseFloat(discountedPrice),
+          }),
+          image,
+        };
+      });
+    });
+
+    await browser.close();
+
+    res.status(200).json({
+      success: true,
+      totalData: products.length,
+      category: category,
+      data: products,
+    });
+  } catch (error) {
+    console.error("Error scraping data:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+const PORT = 5000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
