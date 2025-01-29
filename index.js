@@ -8,13 +8,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/:category?", async (req, res) => {
+app.get("/:category", async (req, res) => {
   let category = req.params.category;
 
-  if (category) {
+  const isNumber = !isNaN(category);
+
+  const isString = /^[a-zA-Z]+$/.test(category);
+
+  if (isString) {
     category = category.toLowerCase().replace(/[\s-]+/g, "_");
   }
-  const baseUrl = `https://api.arogga.com/general/v3/search/?_perPage=1000&_is_base=1&_haveImage=1&_product_type=${category}&_order=pv_allow_sales%3Adesc%2CproductCountOrdered%3Adesc&_get_filters=true&f=web&b=Chrome&v=131.0.0.0&os=Windows&osv=10`;
+  const baseUrl = `https://api.arogga.com/general/v3/search/?_perPage=1000&_is_base=1&_haveImage=1&_product_category_id=${category}&_order=pv_allow_sales%3Adesc%2CproductCountOrdered%3Adesc&_get_filters=true&f=web&b=Chrome&v=131.0.0.0&os=Windows&osv=10`;
 
   try {
     let allProducts = [];
@@ -35,7 +39,7 @@ app.get("/:category?", async (req, res) => {
 
         return {
           name: product.p_name || "",
-          category: product.p_type || "",
+          category: product.p_type.toLowerCase().replace(/[\s_]+/g, " ") || "",
           ...(product?.p_brand && { brand: product.p_brand }),
           ...(product?.p_generic_name && { generic: product.p_generic_name }),
           ...(product?.p_strength &&
@@ -67,7 +71,9 @@ app.get("/:category?", async (req, res) => {
     res.json({
       success: true,
       totalData: allProducts.length,
-      category: category,
+      category: isNumber
+        ? allProducts[0]?.category.toLowerCase().replace(/[\s_]+/g, " ")
+        : category,
       data: allProducts,
     });
   } catch (error) {
@@ -80,7 +86,7 @@ app.get("/scrape/:category", async (req, res) => {
   let category = req.params.category;
 
   if (category) {
-    category = category.toLowerCase().replace(/[\s&]+/g, "-");
+    category = category.toLowerCase().replace(/[\s&,]+/g, "-");
   }
   const url = `https://chaldal.com/${category}`;
 
